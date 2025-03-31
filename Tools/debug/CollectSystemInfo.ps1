@@ -115,6 +115,97 @@ function Export-VirtioWinStorageDrivers {
     Write-Host 'Virtio-Win storage drivers configuration collection completed.'
 }
 
+function Export-IOLimitConfiguration {
+    try {
+        $outputFile = Join-Path $logfolderPath 'IO_Limits_Configuration.txt'
+        "=== Windows I/O Limit Configuration Report ===" | Out-File -FilePath $outputFile
+        "Generated: $(Get-Date)" | Out-File -FilePath $outputFile -Append
+        "" | Out-File -FilePath $outputFile -Append
+
+        "=== Disk Timeout Registry Values ===" | Out-File -FilePath $outputFile -Append
+        $registryPaths = @(
+            'HKLM:\SYSTEM\CurrentControlSet\Services\Disk',
+            'HKLM:\SYSTEM\CurrentControlSet\Services\viostor',
+            'HKLM:\SYSTEM\CurrentControlSet\Services\vioscsi',
+            'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e97b-e325-11ce-bfc1-08002be10318}' # Disk Drive Class
+        )
+        $timeoutValues = @('TimeOutValue', 'IoTimeoutValue', 'DiskTimeoutValue')
+        
+        foreach ($path in $registryPaths) {
+            "Registry Path: $path" | Out-File -FilePath $outputFile -Append
+            foreach ($value in $timeoutValues) {
+                try {
+                    $regValue = Get-ItemProperty -Path $path -Name $value -ErrorAction SilentlyContinue
+                    if ($regValue -ne $null) {
+                        "$value = $($regValue.$value)" | Out-File -FilePath $outputFile -Append
+                    }
+                } catch { }
+            }
+            
+            if (Test-Path $path) {
+                Get-ChildItem $path -ErrorAction SilentlyContinue | ForEach-Object {
+                    foreach ($value in $timeoutValues) {
+                        try {
+                            $regValue = Get-ItemProperty -Path $_.PSPath -Name $value -ErrorAction SilentlyContinue
+                            if ($regValue -ne $null) {
+                                "$($_.PSChildName)\$value = $($regValue.$value)" | Out-File -FilePath $outputFile -Append
+                            }
+                        } catch { }
+                    }
+                }
+            }
+            "" | Out-File -FilePath $outputFile -Append
+        }
+
+        "=== Failover Cluster Disk Settings ===" | Out-File -FilePath $outputFile -Append
+        if (Get-Command Get-ClusterResource -ErrorAction SilentlyContinue) {
+            try {
+                Get-ClusterResource | Where-Object { $_.ResourceType -like "*Physical Disk*" } | 
+                ForEach-Object {
+                    "Resource: $($_.Name)" | Out-File -FilePath $outputFile -Append
+                    "Status: $($_.State)" | Out-File -FilePath $outputFile -Append
+                    "Parameters:" | Out-File -FilePath $outputFile -Append
+                    $_ | Get-ClusterParameter | Out-File -FilePath $outputFile -Append
+                    "" | Out-File -FilePath $outputFile -Append
+                }
+            } catch {
+                "Failed to retrieve cluster disk settings: $_" | Out-File -FilePath $outputFile -Append
+            }
+        } else {
+            "Failover Clustering components not installed" | Out-File -FilePath $outputFile -Append
+        }
+        
+        "=== Disk Performance Counters ===" | Out-File -FilePath $outputFile -Append
+        try {
+            Get-Counter -Counter "\PhysicalDisk(*)\*" -ErrorAction SilentlyContinue | 
+                Select-Object -ExpandProperty CounterSamples | 
+                Where-Object { $_.CookedValue -ne 0 -and $_.InstanceName -ne "_Total" } | 
+                Sort-Object InstanceName, Path | 
+                Format-Table -Property InstanceName, Path, CookedValue -AutoSize | 
+                Out-File -FilePath $outputFile -Append
+        } catch {
+            "Failed to retrieve disk performance counters: $_" | Out-File -FilePath $outputFile -Append
+        }
+        
+        "=== Physical Disk Device Properties ===" | Out-File -FilePath $outputFile -Append
+        try {
+            Get-Disk | Select-Object Number, FriendlyName, Model, SerialNumber, Size, PartitionStyle, OperationalStatus, HealthStatus, BusType |
+                Format-Table -AutoSize | Out-File -FilePath $outputFile -Append
+            
+            Get-Disk | ForEach-Object {
+                "Disk $($_.Number) Advanced Properties:" | Out-File -FilePath $outputFile -Append
+                $_ | Get-StorageReliabilityCounter | Out-File -FilePath $outputFile -Append
+                "" | Out-File -FilePath $outputFile -Append
+            }
+        } catch {
+            "Failed to retrieve disk device information: $_" | Out-File -FilePath $outputFile -Append
+        }
+
+        Write-Host 'I/O Limit Configuration collection completed.'
+    } catch {
+        Write-Warning "Failed to collect I/O Limit Configuration: $_"
+    }
+}
 function Export-WindowsUpdateLogs {
     try {
         $logPath = Join-Path $logfolderPath 'WindowsUpdate.log'
@@ -280,6 +371,7 @@ try {
     Export-EventLogs
     Export-DriversList
     Export-VirtioWinStorageDrivers
+    Export-IOLimitConfiguration
     Export-WindowsUpdateLogs
     Export-ServicesList
     Export-WindowsUptime
