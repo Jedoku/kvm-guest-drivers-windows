@@ -97,6 +97,31 @@ function Export-DriversList {
     }
 }
 
+function Export-IOLimits {
+    try {
+        # Get LUN type disks
+        $lunDisks = Get-Disk
+        
+        foreach ($disk in $lunDisks) {
+            $diskNumber = $disk.Number
+            $diskLetter = (Get-Partition -DiskNumber $diskNumber).DriveLetter
+            
+            if ($diskLetter) {
+                $outputFile = Join-Path $logfolderPath "diskspd_$diskLetter.txt"
+                $command = "diskspd.exe -b1M -d30 -o32 -t4 -W -r -L -w0 -c10G $($diskLetter):\test.dat > $outputFile"
+                Invoke-Expression $command
+                
+                $output = "Disk Letter: $diskLetter, DiskSpd output: $outputFile"
+                $output | Out-File -FilePath (Join-Path $logfolderPath 'IOLimits.txt') -Append
+            }
+        }
+        
+        Write-Host 'IO Limits collection completed.'
+    } catch {
+        Write-Warning "Failed to collect IO Limits: $_"
+    }
+}
+
 function Export-VirtioWinStorageDrivers {
     $registryPaths = @(
         'HKLM:\SYSTEM\CurrentControlSet\Services\Disk',
@@ -254,17 +279,18 @@ Write-Output "Log folder path: $logfolderPath"
 try {
     Start-Transcript -Path $progressFile -Append
     $transcriptStarted = $true
-    Export-SystemConfiguration
-    Export-EventLogs
-    Export-DriversList
-    Export-VirtioWinStorageDrivers
-    Export-WindowsUpdateLogs
-    Export-ServicesList
-    Export-WindowsUptime
-    Export-RunningProcesses
-    Export-InstalledApplications
-    Export-InstalledKBs
-    Export-NetworkConfiguration
+    # Export-SystemConfiguration
+    # Export-EventLogs
+    # Export-DriversList
+    Export-IOLimits
+    # Export-VirtioWinStorageDrivers
+    # Export-WindowsUpdateLogs
+    # Export-ServicesList
+    # Export-WindowsUptime
+    # Export-RunningProcesses
+    # Export-InstalledApplications
+    # Export-InstalledKBs
+    # Export-NetworkConfiguration
 
     if ($IncludeSensitiveData) {
         Write-Output "Dump folder path: $dumpfolderPath"
